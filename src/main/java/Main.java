@@ -1,10 +1,19 @@
-import java.io.*;
+import org.apache.http.NameValuePair;
+import org.apache.http.client.utils.URLEncodedUtils;
+
+import java.io.BufferedOutputStream;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -47,7 +56,16 @@ public class Main {
             }
 
             final var path = parts[1];
-            if (!validPaths.contains(path)) {
+            String modifiedPath = path;
+            // Извлекаем Query String из пути запроса
+            String queryString = "";
+            if (modifiedPath.contains("?")) {
+                int index = modifiedPath.indexOf("?");
+                queryString = modifiedPath.substring(index + 1);
+                modifiedPath = modifiedPath.substring(0, index);
+            }
+
+            if (!validPaths.contains(modifiedPath)) {
                 out.write((
                         "HTTP/1.1 404 Not Found\r\n" +
                                 "Content-Length: 0\r\n" +
@@ -59,11 +77,51 @@ public class Main {
                 return;
             }
 
-            final var filePath = Path.of(".", "public", path);
+            // Создаем объект для хранения параметров из тела запроса
+            Map<String, List<String>> postParams = new HashMap<>();
+
+            // Если это POST-запрос и тип контента x-www-form-urlencoded, читаем тело запроса
+            if (parts[0].equals("POST")) {
+                String contentType = "";
+                // Ищем заголовок "Content-Type" в запросе
+                String line;
+                while ((line = in.readLine()) != null) {
+                    if (line.isEmpty()) {
+                        break;  // Заголовки закончились
+                    }
+                    if (line.startsWith("Content-Type:")) {
+                        contentType = line.substring("Content-Type:".length()).trim();
+                    }
+                }
+                // Если тип контента соответствует x-www-form-urlencoded
+                if ("application/x-www-form-urlencoded".equals(contentType)) {
+                    // Читаем тело запроса
+                    StringBuilder requestBody = new StringBuilder();
+                    int contentLength = 0;
+                    while ((line = in.readLine()) != null) {
+                        requestBody.append(line);
+                        contentLength += line.length();
+                    }
+                    // Парсим параметры из тела запроса
+                    List<NameValuePair> params = URLEncodedUtils.parse(requestBody.toString(), java.nio.charset.StandardCharsets.UTF_8);
+                    for (NameValuePair param : params) {
+                        String paramName = param.getName();
+                        String paramValue = param.getValue();
+                        // Добавляем параметры в объект postParams
+                        postParams.computeIfAbsent(paramName, k -> new ArrayList<>()).add(paramValue);
+                    }
+                }
+            }
+
+            // Обработка параметров из тела запроса
+            String postParamValue = getPostParam(postParams, "paramName");
+            List<String> postParamValues = getPostParams(postParams, "paramName");
+
+            final var filePath = Path.of(".", "public", modifiedPath);
             final var mimeType = Files.probeContentType(filePath);
 
             // special case for classic
-            if (path.equals("/classic.html")) {
+            if (modifiedPath.equals("/classic.html")) {
                 final var template = Files.readString(filePath);
                 final var content = template.replace(
                         "{time}",
@@ -99,5 +157,19 @@ public class Main {
                 e.printStackTrace();
             }
         }
+    }
+
+    // Метод для получения значения параметра из x-www-form-urlencoded запроса
+    private static String getPostParam(Map<String, List<String>> postParams, String name) {
+        List<String> values = postParams.get(name);
+        if (values != null && !values.isEmpty()) {
+            return values.get(0);
+        }
+        return null; // Если параметр не найден
+    }
+
+    // Метод для получения всех значений параметра из x-www-form-urlencoded запроса
+    private static List<String> getPostParams(Map<String, List<String>> postParams, String name) {
+        return postParams.get(name);
     }
 }
