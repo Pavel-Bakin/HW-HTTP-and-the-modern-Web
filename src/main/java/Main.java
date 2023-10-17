@@ -7,6 +7,8 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import org.apache.http.NameValuePair;
+import org.apache.http.client.utils.URLEncodedUtils;
 
 public class Main {
     public static void main(String[] args) {
@@ -29,6 +31,22 @@ public class Main {
         }
     }
 
+    // Метод для извлечения параметра из Query String
+    private static String getQueryParam(String queryString, String name) {
+        List<NameValuePair> params = URLEncodedUtils.parse(queryString, java.nio.charset.StandardCharsets.UTF_8);
+        for (NameValuePair param : params) {
+            if (param.getName().equals(name)) {
+                return param.getValue();
+            }
+        }
+        return null; // Если параметр не найден
+    }
+
+    // Метод для извлечения всех параметров из Query String
+    private static List<NameValuePair> getQueryParams(String queryString) {
+        return URLEncodedUtils.parse(queryString, java.nio.charset.StandardCharsets.UTF_8);
+    }
+
     // Вынесенный метод для обработки подключения
     private static void handleConnection(Socket socket, List<String> validPaths) {
         try (
@@ -47,7 +65,16 @@ public class Main {
             }
 
             final var path = parts[1];
-            if (!validPaths.contains(path)) {
+            String modifiedPath = path;
+            // Извлекаем Query String из пути запроса
+            String queryString = "";
+            if (path.contains("?")) {
+                int index = path.indexOf("?");
+                queryString = path.substring(index + 1);
+                modifiedPath = path.substring(0, index);
+            }
+
+            if (!validPaths.contains(modifiedPath)) {
                 out.write((
                         "HTTP/1.1 404 Not Found\r\n" +
                                 "Content-Length: 0\r\n" +
@@ -59,11 +86,11 @@ public class Main {
                 return;
             }
 
-            final var filePath = Path.of(".", "public", path);
+            final var filePath = Path.of(".", "public", modifiedPath);
             final var mimeType = Files.probeContentType(filePath);
 
             // special case for classic
-            if (path.equals("/classic.html")) {
+            if (modifiedPath.equals("/classic.html")) {
                 final var template = Files.readString(filePath);
                 final var content = template.replace(
                         "{time}",
@@ -90,6 +117,13 @@ public class Main {
                 Files.copy(filePath, out);
                 out.flush();
             }
+
+            // Пример использования getQueryParam для получения значения параметра
+            String paramName = "paramName";
+            String paramValue = getQueryParam(queryString, paramName);
+
+            // Пример использования getQueryParams для получения всех параметров
+            List<NameValuePair> queryParams = getQueryParams(queryString);
         } catch (IOException e) {
             e.printStackTrace();
         } finally {
