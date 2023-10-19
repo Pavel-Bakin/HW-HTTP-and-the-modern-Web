@@ -8,8 +8,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.HashMap;
 
 public class Server {
     private int threadPoolSize;
@@ -44,26 +46,22 @@ public class Server {
                 final var out = new BufferedOutputStream(socket.getOutputStream());
         ) {
             // read only request line for simplicity
-            // must be in the form GET /path HTTP/1.1
             final var requestLine = in.readLine();
-            final var parts = requestLine.split(" ");
+            Request request = parseRequest(requestLine);
 
-            if (parts.length != 3) {
-                // just close the socket
+            if (request == null) {
+                // Invalid request, just close the socket
                 socket.close();
                 return;
             }
 
-            final var path = parts[1];
-            String modifiedPath = path;
-            // Извлекаем Query String из пути запроса
-            String queryString = "";
-            if (path.contains("?")) {
-                int index = path.indexOf("?");
-                queryString = path.substring(index + 1);
-                modifiedPath = path.substring(0, index);
-            }
+            String modifiedPath = request.getPath();
+            Map<String, String> queryParams = request.getQueryParams();
 
+            System.out.println("Request Path: " + modifiedPath);
+            System.out.println("Query Parameters: " + queryParams);
+
+            // Остальная часть обработки запроса
             if (!validPaths.contains(modifiedPath)) {
                 out.write((
                         "HTTP/1.1 404 Not Found\r\n" +
@@ -73,6 +71,7 @@ public class Server {
                 ).getBytes());
                 out.flush();
                 socket.close();
+                System.out.println("Request processed with 404 Not Found");
                 return;
             }
 
@@ -107,6 +106,8 @@ public class Server {
                 Files.copy(filePath, out);
                 out.flush();
             }
+
+            System.out.println("Request processed successfully");
         } catch (IOException e) {
             e.printStackTrace();
         } finally {
@@ -116,5 +117,35 @@ public class Server {
                 e.printStackTrace();
             }
         }
+    }
+
+    private Request parseRequest(String requestLine) {
+        final var parts = requestLine.split(" ");
+
+        if (parts.length != 3) {
+            // Invalid request, just close the socket
+            return null;
+        }
+
+        final var path = parts[1];
+        String modifiedPath = path;
+        Map<String, String> queryParams = new HashMap<>();
+
+        // Извлекаем Query String из пути запроса
+        if (path.contains("?")) {
+            int index = path.indexOf("?");
+            modifiedPath = path.substring(0, index);
+            String queryString = path.substring(index + 1);
+            String[] params = queryString.split("&");
+
+            for (String param : params) {
+                String[] keyValue = param.split("=");
+                if (keyValue.length == 2) {
+                    queryParams.put(keyValue[0], keyValue[1]);
+                }
+            }
+        }
+
+        return new Request(modifiedPath, queryParams);
     }
 }
